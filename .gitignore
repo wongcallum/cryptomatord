@@ -1,0 +1,9 @@
+# Build output
+/cryptomatord
+/result
+/result-*
+
+# Go
+*.test
+*.out
+/vendor/
