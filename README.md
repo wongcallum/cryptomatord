@@ -1,5 +1,12 @@
 # cryptomatord
 
+> [!WARNING]  
+> This project, including the documentation below,
+> was written with Claude Code. The output has not been verified by a human.
+> Until it has been rewritten from scratch by a human (me), it remains
+> strictly for my personal use. That being said, it does not contain any
+> cryptographic code and only shells out to the official Cryptomator Java CLI.
+
 A small Go daemon that sits between the Cryptomator GUI and the Cryptomator CLI:
 it supervises one [`cryptomator-cli`](https://github.com/cryptomator/cli) process
 per vault, brokers each vault's passphrase from a command you choose, and exposes
