@@ -59,7 +59,7 @@
           };
 
           # Boot a VM exercising the NixOS module end-to-end.
-          integration = pkgs.callPackage ./nixos-test.nix {
+          integration = pkgs.callPackage ./nix/nixos-test.nix {
             module = self.nixosModules.default;
           };
         };
