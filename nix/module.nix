@@ -2,68 +2,22 @@
 # FUSE mounts land in the user's session and password commands can reach the
 # user's gpg-agent / keyring.
 #
+# This module deliberately provides *no* configuration: the daemon reads
+# ~/.config/cryptomatord/config.json (i.e. $XDG_CONFIG_HOME/cryptomatord/config.json).
+# Write that file with the home-manager module (cryptomatord.homeModules.default),
+# or by hand — see the README's Configuration section for the schema. Use this
+# module or the home-manager service, not both.
+#
 # Usage:
 #   imports = [ cryptomatord.nixosModules.default ];
 #   services.cryptomatord = {
 #     enable = true;
-#     vaults.work = {
-#       path = "/home/alice/Cloud/work";
-#       mountPoint = "/home/alice/mnt/work";
-#       passwordCommand = "pass show vaults/work";
-#     };
 #     extraPackages = [ pkgs.pass pkgs.gnupg ];  # for the password command
 #   };
 self:
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.cryptomatord;
-  format = pkgs.formats.json { };
-
-  vaultType = lib.types.submodule {
-    options = {
-      path = lib.mkOption {
-        type = lib.types.str;
-        description = "Absolute path to the vault directory (containing vault.cryptomator).";
-      };
-      mountPoint = lib.mkOption {
-        type = lib.types.str;
-        description = "Absolute path of an (ideally empty) directory to mount the cleartext at.";
-      };
-      passwordCommand = lib.mkOption {
-        type = lib.types.str;
-        example = "pass show vaults/work";
-        description = "Shell command whose stdout is the vault passphrase.";
-      };
-      autoMount = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Mount this vault automatically when the daemon starts.";
-      };
-      mounter = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = "Override the mounter class for this vault (see `cryptomator-cli list-mounters`).";
-      };
-      mountOptions = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
-        description = "Extra mount options, passed through as repeated --mountOption flags.";
-      };
-    };
-  };
-
-  daemonConfig = {
-    cliPath = "${cfg.cliPackage}/bin/cryptomator-cli";
-    defaultMounter = cfg.defaultMounter;
-    vaults = lib.mapAttrs
-      (_name: v:
-        { inherit (v) path mountPoint passwordCommand autoMount mountOptions; }
-        // lib.optionalAttrs (v.mounter != null) { inherit (v) mounter; }
-      )
-      cfg.vaults;
-  } // lib.optionalAttrs (cfg.socket != null) { socket = cfg.socket; };
-
-  configFile = format.generate "cryptomatord.json" daemonConfig;
 in
 {
   options.services.cryptomatord = {
@@ -80,23 +34,11 @@ in
       type = lib.types.package;
       default = pkgs.cryptomator-cli;
       defaultText = lib.literalExpression "pkgs.cryptomator-cli";
-      description = "The cryptomator-cli package the daemon drives.";
-    };
-
-    socket = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
       description = ''
-        Control socket path. When null (the default) the daemon uses
-        $XDG_RUNTIME_DIR/cryptomatord/control.sock, which ctl also defaults to.
-        Only set this if you need a non-default location.
+        The cryptomator-cli package. Put on the daemon's PATH and in
+        environment.systemPackages; the config file's cliPath is what the daemon
+        actually execs.
       '';
-    };
-
-    defaultMounter = lib.mkOption {
-      type = lib.types.str;
-      default = "org.cryptomator.frontend.fuse.mount.LinuxFuseMountProvider";
-      description = "Default mounter class for vaults that don't set one.";
     };
 
     logLevel = lib.mkOption {
@@ -111,12 +53,6 @@ in
       example = lib.literalExpression "[ pkgs.pass pkgs.gnupg ]";
       description = "Extra packages on the daemon's PATH, e.g. tools used by passwordCommand.";
     };
-
-    vaults = lib.mkOption {
-      type = lib.types.attrsOf vaultType;
-      default = { };
-      description = "Vaults to manage, keyed by name.";
-    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -130,7 +66,9 @@ in
       # NOTE: intentionally no PrivateMounts / ProtectSystem=strict etc. — the
       # FUSE mounts must remain visible to the rest of the user session.
       serviceConfig = {
-        ExecStart = "${cfg.package}/bin/cryptomatord serve --config ${configFile} --log-level ${cfg.logLevel}";
+        # No --config: the daemon defaults to $XDG_CONFIG_HOME/cryptomatord/config.json
+        # (i.e. ~/.config/cryptomatord/config.json), provided out of band.
+        ExecStart = "${cfg.package}/bin/cryptomatord serve --log-level ${cfg.logLevel}";
         Restart = "on-failure";
         RestartSec = 2;
         # Deliver SIGTERM only to the daemon, which then SIGINTs the

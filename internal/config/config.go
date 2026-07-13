@@ -140,3 +140,17 @@ func DefaultSocketPath() string {
 	}
 	return filepath.Join(dir, "cryptomatord", "control.sock")
 }
+
+// DefaultConfigPath is $XDG_CONFIG_HOME/cryptomatord/config.json (or
+// $HOME/.config/cryptomatord/config.json when XDG_CONFIG_HOME is unset). It is
+// what `serve` loads when no --config is given, so the home-manager module can
+// drop the config there and the NixOS module needs no store-path indirection.
+func DefaultConfigPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		// Neither XDG_CONFIG_HOME nor HOME set; fall back to a tmp path so the
+		// error surfaces as "file not found" rather than a relative path.
+		dir = filepath.Join(os.TempDir(), fmt.Sprintf("cryptomatord-%d", os.Getuid()))
+	}
+	return filepath.Join(dir, "cryptomatord", "config.json")
+}

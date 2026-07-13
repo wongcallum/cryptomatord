@@ -2,7 +2,11 @@
 # drives it with ctl. The fake cryptomator-cli performs a real (unprivileged)
 # FUSE mount via bindfs, so the daemon's genuine isMountpoint() and
 # SIGINT-unmount code paths run for real.
-{ testers, writeShellApplication, bindfs, module }:
+#
+# The module deliberately provides no config, so this test writes the daemon's
+# config to ~/.config/cryptomatord/config.json (where the daemon reads it),
+# mirroring what the home-manager module does.
+{ testers, writeShellApplication, bindfs, formats, module }:
 let
   fakeCli = writeShellApplication {
     name = "cryptomator-cli";
@@ -22,6 +26,18 @@ let
       export FUSERMOUNT_PROG=/run/wrappers/bin/fusermount3
       exec bindfs -f --no-allow-other "$src" "$mountpoint"
     '';
+  };
+
+  # The config the daemon reads from the XDG config dir. autoMount is off so the
+  # test drives mounting explicitly.
+  configFile = (formats.json { }).generate "cryptomatord.json" {
+    cliPath = "${fakeCli}/bin/cryptomator-cli";
+    vaults.work = {
+      path = "/home/tester/vaultsrc";
+      mountPoint = "/home/tester/mnt/work";
+      passwordCommand = "printf hunter2";
+      autoMount = false;
+    };
   };
 in
 testers.nixosTest {
@@ -49,13 +65,15 @@ testers.nixosTest {
       enable = true;
       cliPackage = fakeCli;
       logLevel = "debug";
-      vaults.work = {
-        path = "/home/tester/vaultsrc";
-        mountPoint = "/home/tester/mnt/work";
-        passwordCommand = "printf hunter2";
-        autoMount = false; # drive mounting explicitly from the test
-      };
     };
+
+    # Drop the daemon's config into the XDG config dir (the module no longer
+    # provides it). systemd-tmpfiles creates the parent dirs and symlinks it in.
+    systemd.tmpfiles.rules = [
+      "d /home/tester/.config 0755 tester users -"
+      "d /home/tester/.config/cryptomatord 0755 tester users -"
+      "L+ /home/tester/.config/cryptomatord/config.json - - - - ${configFile}"
+    ];
   };
 
   testScript = ''

@@ -31,7 +31,7 @@ func usage(w *os.File) {
 	_, _ = fmt.Fprint(w, `cryptomatord — supervise cryptomator-cli vault mounts
 
 usage:
-  cryptomatord serve --config <path> [--log-level info]
+  cryptomatord serve [--config <path>] [--log-level info]
   cryptomatord ctl [--socket <path>] status [<name>] [--json]
   cryptomatord ctl [--socket <path>] mount <name> [--json]
   cryptomatord ctl [--socket <path>] unmount <name> [--json]

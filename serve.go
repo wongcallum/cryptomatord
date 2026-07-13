@@ -19,15 +19,16 @@ const shutdownTimeout = 45 * time.Second
 
 func runServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	cfgPath := fs.String("config", os.Getenv("CRYPTOMATORD_CONFIG"), "path to JSON config file")
+	cfgPath := fs.String("config", os.Getenv("CRYPTOMATORD_CONFIG"), "path to JSON config file (default: $XDG_CONFIG_HOME/cryptomatord/config.json)")
 	logLevel := fs.String("log-level", "info", "log level: debug|info|warn|error")
 	_ = fs.Parse(args)
 
 	logger := newLogger(*logLevel)
 
+	// With no explicit --config (or $CRYPTOMATORD_CONFIG), read the config from
+	// the XDG config dir, where the home-manager module writes it.
 	if *cfgPath == "" {
-		logger.Error("serve: --config is required (or set CRYPTOMATORD_CONFIG)")
-		return 2
+		*cfgPath = config.DefaultConfigPath()
 	}
 
 	cfg, err := config.Load(*cfgPath)

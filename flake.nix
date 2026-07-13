@@ -67,6 +67,8 @@
     )
     // {
       nixosModules.default = import ./nix/module.nix self;
+      # home-manager module (self-contained: store-path config + runs the service).
+      homeModules.default = import ./nix/hm-module.nix self;
       overlays.default = final: _prev: {
         cryptomatord = final.callPackage ./nix/package.nix { };
       };

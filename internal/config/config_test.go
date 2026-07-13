@@ -76,6 +76,20 @@ func TestPerVaultMounterOverride(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigPath(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg/conf")
+	if got, want := DefaultConfigPath(), "/xdg/conf/cryptomatord/config.json"; got != want {
+		t.Errorf("DefaultConfigPath = %q, want %q", got, want)
+	}
+
+	// With XDG_CONFIG_HOME unset it derives from HOME/.config.
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/home/alice")
+	if got, want := DefaultConfigPath(), "/home/alice/.config/cryptomatord/config.json"; got != want {
+		t.Errorf("DefaultConfigPath = %q, want %q", got, want)
+	}
+}
+
 func TestValidation(t *testing.T) {
 	cases := map[string]string{
 		"missing path":       `{"vaults":{"v":{"mountPoint":"/b","passwordCommand":"x"}}}`,
