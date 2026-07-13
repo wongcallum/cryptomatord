@@ -3,6 +3,10 @@
 /result
 /result-*
 
+# Nix
+/.envrc
+/.direnv/
+
 # Go
 *.test
 *.out
