@@ -135,6 +135,15 @@ in
     systemd.user.services.cryptomatord = {
       Unit = {
         Description = "cryptomatord — cryptomator-cli vault supervisor";
+        # Ordered after the graphical session (not just default.target): the
+        # daemon execs passwordCommand (e.g. zenity), which needs DISPLAY /
+        # WAYLAND_DISPLAY. Those are imported into the user manager's
+        # environment by the compositor as it brings up graphical-session.target;
+        # starting any earlier freezes the daemon's own environment without
+        # them. PartOf restarts the daemon whenever the session cycles, so it
+        # always inherits fresh values.
+        After = "graphical-session.target";
+        PartOf = "graphical-session.target";
       };
 
       # NOTE: intentionally no sandboxing (PrivateMounts etc.) — the FUSE mounts
@@ -155,7 +164,7 @@ in
       };
 
       Install = {
-        WantedBy = [ "default.target" ];
+        WantedBy = [ "graphical-session.target" ];
       };
     };
   };

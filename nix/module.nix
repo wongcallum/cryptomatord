@@ -61,7 +61,16 @@ in
 
     systemd.user.services.cryptomatord = {
       description = "cryptomatord — cryptomator-cli vault supervisor";
-      wantedBy = [ "default.target" ];
+      # Ordered after the graphical session (not just default.target): the
+      # daemon execs passwordCommand (e.g. zenity), which needs DISPLAY /
+      # WAYLAND_DISPLAY. Those are imported into the user manager's
+      # environment by the compositor as it brings up graphical-session.target;
+      # starting any earlier freezes the daemon's own environment without them.
+      # partOf restarts the daemon whenever the session cycles, so it always
+      # inherits fresh values.
+      after = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
+      wantedBy = [ "graphical-session.target" ];
 
       # NOTE: intentionally no PrivateMounts / ProtectSystem=strict etc. — the
       # FUSE mounts must remain visible to the rest of the user session.
