@@ -5,6 +5,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,8 +18,9 @@ import (
 
 // Client talks to the control API over a unix socket.
 type Client struct {
-	http *http.Client
-	base string
+	http   *http.Client
+	stream *http.Client // no overall timeout, for long-lived /events streams
+	base   string
 }
 
 // New returns a client dialing the given unix socket path.
@@ -30,7 +32,8 @@ func New(socket string) *Client {
 		},
 	}
 	return &Client{
-		http: &http.Client{Transport: tr, Timeout: 90 * time.Second},
+		http:   &http.Client{Transport: tr, Timeout: 90 * time.Second},
+		stream: &http.Client{Transport: tr},
 		// Host is ignored for unix transports but required to form a valid URL.
 		base: "http://unix",
 	}
@@ -63,6 +66,38 @@ func (c *Client) Mount(ctx context.Context, name string) (state.Status, error) {
 func (c *Client) Unmount(ctx context.Context, name string) (state.Status, error) {
 	var out state.Status
 	return out, c.do(ctx, http.MethodPost, "/vaults/"+url.PathEscape(name)+"/unmount", &out)
+}
+
+// Watch calls fn with the full vault list on connect and after every change,
+// until ctx is cancelled (returns ctx.Err()) or the daemon closes the stream.
+func (c *Client) Watch(ctx context.Context, fn func([]state.Status)) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/events", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.stream.Do(req)
+	if err != nil {
+		return fmt.Errorf("connecting to daemon: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("daemon returned %s", resp.Status)
+	}
+
+	dec := json.NewDecoder(resp.Body)
+	for {
+		var list []state.Status
+		if err := dec.Decode(&list); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if errors.Is(err, io.EOF) {
+				return fmt.Errorf("daemon closed the event stream")
+			}
+			return fmt.Errorf("reading event stream: %w", err)
+		}
+		fn(list)
+	}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, out any) error {

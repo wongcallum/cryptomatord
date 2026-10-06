@@ -33,6 +33,7 @@ func usage(w *os.File) {
 usage:
   cryptomatord serve [--config <path>] [--log-level info]
   cryptomatord ctl [--socket <path>] status [<name>] [--json]
+  cryptomatord ctl [--socket <path>] watch [--json]
   cryptomatord ctl [--socket <path>] mount <name> [--json]
   cryptomatord ctl [--socket <path>] unmount <name> [--json]
 `)

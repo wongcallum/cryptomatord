@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,10 +19,31 @@ import (
 
 // fakeManager implements api.Manager without spawning processes.
 type fakeManager struct {
+	mu       sync.Mutex
 	statuses map[string]state.Status
+	subs     []chan struct{}
+}
+
+func (f *fakeManager) Subscribe() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	f.mu.Lock()
+	f.subs = append(f.subs, ch)
+	f.mu.Unlock()
+	return ch, func() {}
+}
+
+func (f *fakeManager) notify() {
+	for _, ch := range f.subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (f *fakeManager) List() []state.Status {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	names := make([]string, 0, len(f.statuses))
 	for n := range f.statuses {
 		names = append(names, n)
@@ -35,6 +57,8 @@ func (f *fakeManager) List() []state.Status {
 }
 
 func (f *fakeManager) Status(name string) (state.Status, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	s, ok := f.statuses[name]
 	if !ok {
 		return state.Status{}, supervisor.ErrVaultNotFound
@@ -43,22 +67,28 @@ func (f *fakeManager) Status(name string) (state.Status, error) {
 }
 
 func (f *fakeManager) Mount(name string) (state.Status, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	s, ok := f.statuses[name]
 	if !ok {
 		return state.Status{}, supervisor.ErrVaultNotFound
 	}
 	s.State = state.Mounted
 	f.statuses[name] = s
+	f.notify()
 	return s, nil
 }
 
 func (f *fakeManager) Unmount(name string) (state.Status, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	s, ok := f.statuses[name]
 	if !ok {
 		return state.Status{}, supervisor.ErrVaultNotFound
 	}
 	s.State = state.Unmounted
 	f.statuses[name] = s
+	f.notify()
 	return s, nil
 }
 
@@ -138,5 +168,38 @@ func TestClientNotFound(t *testing.T) {
 	}
 	if _, err := cl.Mount(ctx, "nope"); err == nil {
 		t.Fatal("expected error mounting unknown vault")
+	}
+}
+
+func TestClientWatch(t *testing.T) {
+	cl := startServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	snaps := make(chan []state.Status, 8)
+	errC := make(chan error, 1)
+	go func() { errC <- cl.Watch(ctx, func(l []state.Status) { snaps <- l }) }()
+
+	// The initial snapshot arrives on connect.
+	first := <-snaps
+	if len(first) != 2 || first[1].State != state.Unmounted {
+		t.Fatalf("initial snapshot = %+v", first)
+	}
+
+	if _, err := cl.Mount(ctx, "work"); err != nil {
+		t.Fatalf("Mount: %v", err)
+	}
+	select {
+	case l := <-snaps:
+		if l[1].Name != "work" || l[1].State != state.Mounted {
+			t.Errorf("after Mount snapshot = %+v", l)
+		}
+	case <-ctx.Done():
+		t.Fatal("no snapshot pushed after Mount")
+	}
+
+	cancel()
+	if err := <-errC; err != context.Canceled {
+		t.Errorf("Watch returned %v, want context.Canceled", err)
 	}
 }

@@ -96,6 +96,7 @@ module or a non-Nix setup you write it yourself at the default XDG path:
 cryptomatord ctl status              # table of all vaults
 cryptomatord ctl status --json       # one-line JSON (for a widget or script)
 cryptomatord ctl status work
+cryptomatord ctl watch --json        # one JSON line now and on every change
 cryptomatord ctl mount work          # blocks until mounted; exits 1 if it failed
 cryptomatord ctl unmount work
 cryptomatord ctl --socket /path/to.sock status
@@ -157,8 +158,11 @@ Enable the home-manager service or the NixOS one, not both.
 
 A widget or script shells out to `ctl` and parses JSON — no HTTP or socket code
 needed. Run `cryptomatord ctl status --json` to read state, and
-`cryptomatord ctl mount work` / `unmount work` for actions. Poll `status` on a
-timer (or on button actions) to keep a widget live.
+`cryptomatord ctl mount work` / `unmount work` for actions. To keep a widget
+live without polling, run one long-lived `cryptomatord ctl watch --json`: it
+prints the full vault list as one JSON line on connect and again after every
+state change, and exits 1 when the daemon goes away (restart it after a short
+delay). Under the hood this is `GET /events`, a newline-delimited JSON stream.
 
 ## Manual smoke test with a real vault
 

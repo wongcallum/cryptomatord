@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -55,6 +58,11 @@ func runCtl(args []string) int {
 	}
 
 	cl := client.New(socket)
+
+	if pos[0] == "watch" {
+		return runWatch(cl, jsonOut)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), ctlTimeout)
 	defer cancel()
 
@@ -103,9 +111,31 @@ func runCtl(args []string) int {
 	}
 }
 
+// runWatch prints the vault list on connect and after every change. It runs
+// until interrupted (exit 0) or the daemon goes away (exit 1), so a widget can
+// hold one long-lived process instead of polling `status`.
+func runWatch(cl *client.Client, jsonOut bool) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	first := true
+	err := cl.Watch(ctx, func(sts []state.Status) {
+		if !jsonOut && !first {
+			fmt.Println()
+		}
+		first = false
+		printStatuses(sts, jsonOut)
+	})
+	if errors.Is(err, context.Canceled) {
+		return 0
+	}
+	return ctlError(err)
+}
+
 func ctlUsage() {
 	fmt.Fprint(os.Stderr, `usage:
   cryptomatord ctl [--socket <path>] status [<name>] [--json]
+  cryptomatord ctl [--socket <path>] watch [--json]
   cryptomatord ctl [--socket <path>] mount <name> [--json]
   cryptomatord ctl [--socket <path>] unmount <name> [--json]
 `)

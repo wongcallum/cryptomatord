@@ -18,16 +18,52 @@ type Manager struct {
 	vaults map[string]*Vault
 	names  []string // sorted, for stable iteration
 	logger *slog.Logger
+
+	subMu sync.Mutex
+	subs  map[chan struct{}]struct{}
 }
 
 // NewManager builds a manager from config. Call Start to launch supervision.
 func NewManager(cfg *config.Config, logger *slog.Logger) *Manager {
-	m := &Manager{vaults: make(map[string]*Vault), logger: logger}
+	m := &Manager{
+		vaults: make(map[string]*Vault),
+		logger: logger,
+		subs:   make(map[chan struct{}]struct{}),
+	}
 	for _, name := range cfg.VaultNames() {
-		m.vaults[name] = newVault(name, cfg.Vaults[name], cfg.CLIPath, cfg.DefaultMounter, logger.With("vault", name))
+		v := newVault(name, cfg.Vaults[name], cfg.CLIPath, cfg.DefaultMounter, logger.With("vault", name))
+		v.onChange = m.notify
+		m.vaults[name] = v
 		m.names = append(m.names, name)
 	}
 	return m
+}
+
+// Subscribe returns a channel that receives a value whenever any vault's
+// status changes, and a func to unsubscribe. The channel has a one-slot buffer
+// and sends never block, so a burst of changes coalesces into one wakeup; the
+// subscriber should re-read List() after each receive.
+func (m *Manager) Subscribe() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	m.subMu.Lock()
+	m.subs[ch] = struct{}{}
+	m.subMu.Unlock()
+	return ch, func() {
+		m.subMu.Lock()
+		delete(m.subs, ch)
+		m.subMu.Unlock()
+	}
+}
+
+func (m *Manager) notify() {
+	m.subMu.Lock()
+	defer m.subMu.Unlock()
+	for ch := range m.subs {
+		select {
+		case ch <- struct{}{}:
+		default: // a wakeup is already pending
+		}
+	}
 }
 
 // Start launches every vault's supervisor loop, then auto-mounts flagged vaults

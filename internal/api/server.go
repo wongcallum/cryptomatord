@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/callum/cryptomatord/internal/state"
 	"github.com/callum/cryptomatord/internal/supervisor"
@@ -21,6 +22,7 @@ type Manager interface {
 	Status(name string) (state.Status, error)
 	Mount(name string) (state.Status, error)
 	Unmount(name string) (state.Status, error)
+	Subscribe() (<-chan struct{}, func())
 }
 
 // ErrorResponse is the body returned for error status codes.
@@ -35,14 +37,20 @@ type Server struct {
 	logger *slog.Logger
 	http   *http.Server
 	ln     net.Listener
+
+	// closing ends open /events streams on Shutdown, which otherwise waits for
+	// them until its context expires.
+	closing   chan struct{}
+	closeOnce sync.Once
 }
 
 // NewServer wires the routes. Call Listen then Serve.
 func NewServer(mgr Manager, socket string, logger *slog.Logger) *Server {
-	s := &Server{mgr: mgr, socket: socket, logger: logger}
+	s := &Server{mgr: mgr, socket: socket, logger: logger, closing: make(chan struct{})}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /vaults", s.handleList)
+	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /vaults/{name}", s.handleGet)
 	mux.HandleFunc("POST /vaults/{name}/mount", s.handleMount)
 	mux.HandleFunc("POST /vaults/{name}/unmount", s.handleUnmount)
@@ -80,6 +88,7 @@ func (s *Server) Serve() error {
 
 // Shutdown gracefully stops the server and removes the socket.
 func (s *Server) Shutdown(ctx context.Context) {
+	s.closeOnce.Do(func() { close(s.closing) })
 	_ = s.http.Shutdown(ctx)
 	_ = os.Remove(s.socket)
 }
@@ -90,6 +99,35 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleList(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, s.mgr.List())
+}
+
+// handleEvents streams the full vault list as newline-delimited JSON: once on
+// connect, then again after every status change, until the client disconnects.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		s.writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "streaming unsupported"})
+		return
+	}
+	// Subscribe before the first snapshot so no change can slip in between.
+	changed, unsubscribe := s.mgr.Subscribe()
+	defer unsubscribe()
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	enc := json.NewEncoder(w)
+	for {
+		if err := enc.Encode(s.mgr.List()); err != nil {
+			return
+		}
+		flusher.Flush()
+		select {
+		case <-changed:
+		case <-r.Context().Done():
+			return
+		case <-s.closing:
+			return
+		}
+	}
 }
 
 func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {

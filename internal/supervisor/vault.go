@@ -61,6 +61,9 @@ type Vault struct {
 
 	cmds chan command
 
+	// onChange, if set, is called after every published status change.
+	onChange func()
+
 	mu     sync.Mutex
 	status state.Status
 }
@@ -105,7 +108,6 @@ func (v *Vault) Status() state.Status {
 
 func (v *Vault) setState(s state.State, err error) {
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	v.status.State = s
 	v.status.Since = time.Now()
 	if err != nil {
@@ -113,15 +115,24 @@ func (v *Vault) setState(s state.State, err error) {
 	} else {
 		v.status.Error = ""
 	}
+	v.mu.Unlock()
+	v.changed()
 }
 
 // transition changes state while preserving the existing Error (used for
 // Restarting, which keeps the crash cause visible).
 func (v *Vault) transition(s state.State) {
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	v.status.State = s
 	v.status.Since = time.Now()
+	v.mu.Unlock()
+	v.changed()
+}
+
+func (v *Vault) changed() {
+	if v.onChange != nil {
+		v.onChange()
+	}
 }
 
 // run is the vault's single-threaded supervisor loop.
